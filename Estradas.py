@@ -1,117 +1,135 @@
 import streamlit as st
 import pandas as pd
-import unicodedata
 import folium
-from folium.plugins import MarkerCluster, HeatMap
 from streamlit_folium import st_folium
+import numpy as np
+import os
+
+# --- Configuração da página ---
+st.set_page_config(page_title="Usuport - BRs da Bahia", layout="wide")
+
+# --- Título ---
+st.title("Usuport - BRs da Bahia")
+
+# --- Carregar os dados ---
+df = pd.read_csv('estradas_filtradas_ba.csv', sep=';')
+
+# --- Corrigir o KM para número ---
+df['km'] = pd.to_numeric(df['km'], errors='coerce')
+
+# --- Sidebar para selecionar a BR ---
+brs_disponiveis = df['br'].dropna().unique()
+br_selecionada = st.sidebar.selectbox('Selecione uma BR:', sorted(brs_disponiveis))
+
+# --- Filtrar dados pela BR selecionada ---
+df_filtrado = df[df['br'] == br_selecionada].dropna(subset=['km', 'latitude', 'longitude'])
+
+# --- Ordenar por KM ---
+df_filtrado = df_filtrado.sort_values(by='km')
+
+# --- Mostrar informações na sidebar ---
+st.sidebar.markdown("### Informações da BR selecionada:")
+
+# Contar acidentes (ID únicos)
+qtd_acidentes = df_filtrado['id'].nunique()
+st.sidebar.write(f"🛑 Acidentes registrados: {qtd_acidentes}")
+
+# Contar mortos
+total_mortos = df_filtrado['mortos'].sum()
+st.sidebar.write(f"☠️ Número de mortos: {total_mortos}")
+
+# --- Criar o mapa ---
+lat_mean = df_filtrado['latitude'].mean()
+lon_mean = df_filtrado['longitude'].mean()
+m = folium.Map(location=[lat_mean, lon_mean], zoom_start=7)
+
+# --- Definir os intervalos a cada 10km ---
+km_min = int(df_filtrado['km'].min())
+km_max = int(df_filtrado['km'].max())
+intervalos = np.arange(km_min, km_max + 10, 10)
+
+# --- Criar coluna de grupo 10km ---
+df_filtrado['grupo_10km'] = pd.cut(df_filtrado['km'], bins=intervalos, labels=False, include_lowest=True)
+
+# --- Contagem de acidentes por grupo ---
+contagem_por_grupo = df_filtrado['grupo_10km'].value_counts().sort_index()
+total_acidentes = contagem_por_grupo.sum()
+porcentagem_por_grupo = contagem_por_grupo / total_acidentes
+
+# --- Função para definir cor baseado na porcentagem ---
+def cor_por_percentual(pct):
+    if pct < 0.02:
+        return 'green'
+    elif pct < 0.05:
+        return 'orange'
+    else:
+        return 'red'
+
+# --- Construir linha da estrada completa ---
+for i in range(len(intervalos) - 1):
+    km_inicio = intervalos[i]
+    km_fim = intervalos[i + 1]
+
+    dados_trecho = df_filtrado[(df_filtrado['km'] >= km_inicio) & (df_filtrado['km'] < km_fim)]
+
+    if not dados_trecho.empty:
+        grupo_id = dados_trecho['grupo_10km'].iloc[0]
+        cor = cor_por_percentual(porcentagem_por_grupo.get(grupo_id, 0))
+        pontos = dados_trecho[['latitude', 'longitude']].values.tolist()
+    else:
+        pontos = []
+        if i > 0:
+            antes = df_filtrado[df_filtrado['km'] < km_inicio]
+            if not antes.empty:
+                ponto_antes = antes.iloc[-1][['latitude', 'longitude']].tolist()
+                pontos.append(ponto_antes)
+
+        if i < len(intervalos) - 2:
+            depois = df_filtrado[df_filtrado['km'] >= km_fim]
+            if not depois.empty:
+                ponto_depois = depois.iloc[0][['latitude', 'longitude']].tolist()
+                pontos.append(ponto_depois)
+
+        cor = 'gray'
+
+    if len(pontos) >= 2:
+        folium.PolyLine(
+            pontos,
+            color=cor,
+            weight=6,
+            opacity=0.8
+        ).add_to(m)
+
+# --- Adicionar legenda manual ---
+legend_html = """
+<div style="position: fixed; 
+     bottom: 50px; left: 50px; width: 200px; height: 140px; 
+     background-color: white; z-index:9999; font-size:14px;
+     border:2px solid grey; padding:10px;">
+<b>Legenda:</b><br>
+<span style='color:green;'>🟢 Poucos acidentes</span><br>
+<span style='color:orange;'>🟠 Acidentes moderados</span><br>
+<span style='color:red;'>🔴 Muitos acidentes</span><br>
+<span style='color:gray;'>⚪ Sem acidentes</span>
+</div>
+"""
+m.get_root().html.add_child(folium.Element(legend_html))
+
+# --- Exibir o mapa ---
+st_folium(m, width=900, height=600)
+
+# --- Relações abaixo do mapa ---
+st.subheader(f"Análises da {br_selecionada}")
+
+# Quantidade de acidentes de ultrapassagem por tipo de pista
+acidentes_ultrapassagem = df_filtrado[df_filtrado['tipo_acidente'].str.contains('Ultrapassagem', na=False, case=False)]
+contagem_pista = acidentes_ultrapassagem['tipo_pista'].value_counts()
+
+st.write("### Quantidade de acidentes de ultrapassagem por tipo de pista:")
+st.bar_chart(contagem_pista)
+
 
 """
-st.set_page_config(layout="wide")
-
-# Título
-st.title("🚦 Mapa de Acidentes nas BRs da Bahia")
-st.markdown("Este mapa interativo mostra os acidentes ocorridos nas rodovias federais da Bahia com base nos dados fornecidos pelo Detran-BA.")
-
-# Sidebar
-st.sidebar.header("Filtros")
-
-@st.cache_data
-def carregar_dados(path):
-    df = pd.read_csv(path, encoding="latin1", sep=";", on_bad_lines="skip")
-    df.columns = (
-        df.columns
-        .str.strip()
-        .str.lower()
-        .map(lambda x: unicodedata.normalize('NFKD', x).encode('ASCII', 'ignore').decode('utf-8'))
-    )
-    df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
-    df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
-    df["data_inversa"] = pd.to_datetime(df["data_inversa"], errors="coerce")
-    df["ano"] = df["data_inversa"].dt.year
-    df["mes"] = df["data_inversa"].dt.month_name()
-    df["uid"] = df.index.astype(str)
-    return df.dropna(subset=["latitude", "longitude"]).sample(frac=1).reset_index(drop=True)
-
-# Carrega o CSV
-df = carregar_dados("estradas_filtradas_ba.csv")
-
-# Filtros
-anos = sorted(df["ano"].dropna().unique())
-ano_selecionado = st.sidebar.multiselect("Ano", anos, default=anos)
-
-municipios = sorted(df["municipio"].dropna().unique())
-municipios_selecionados = st.sidebar.multiselect("Município", municipios)
-
-filtros = (df["ano"].isin(ano_selecionado)) if ano_selecionado else (df["ano"] > 0)
-if municipios_selecionados:
-    filtros &= df["municipio"].isin(municipios_selecionados)
-
-df_filtrado = df[filtros].copy()
-
-# Limitar para performance
-if len(df_filtrado) > 5000:
-    df_filtrado = df_filtrado.sample(5000)
-
-# Tipo de visualização
-tipo_visualizacao = st.sidebar.radio(
-    "Tipo de visualização no mapa",
-    ["Marcadores", "Cluster", "Densidade (HeatMap)"]
-)
-
-# Estilo do mapa
-tile_selecionado = st.sidebar.selectbox(
-    "Tipo de Mapa Base",
-    options=["OpenStreetMap", "Stamen Terrain", "Stamen Toner", "CartoDB Positron", "CartoDB Dark_Matter"],
-    index=0
-)
-
-tiles = {
-    "OpenStreetMap": "OpenStreetMap",
-    "Stamen Terrain": "Stamen Terrain",
-    "Stamen Toner": "Stamen Toner",
-    "CartoDB Positron": "CartoDB Positron",
-    "CartoDB Dark_Matter": "CartoDB Dark_Matter"
-}
-
-# Cria o mapa base
-mapa = folium.Map(
-    location=[-12.97, -38.50],
-    zoom_start=6,
-    control_scale=True,
-    tiles=tiles[tile_selecionado]
-)
-
-# Só adiciona se tiver dados filtrados
-if not df_filtrado.empty:
-    if tipo_visualizacao == "Marcadores":
-        for _, row in df_filtrado.iterrows():
-            folium.Marker(
-                location=[row["latitude"], row["longitude"]],
-                popup=f"{row['data_inversa'].date()} - {row['municipio']} - {row['tipo_acidente']}",
-                icon=folium.Icon(color="red", icon="info-sign"),
-            ).add_to(mapa)
-
-    elif tipo_visualizacao == "Cluster":
-        marker_cluster = MarkerCluster()
-        for _, row in df_filtrado.iterrows():
-            folium.Marker(
-                location=[row["latitude"], row["longitude"]],
-                popup=f"{row['data_inversa'].date()} - {row['municipio']} - {row['tipo_acidente']}",
-            ).add_to(marker_cluster)
-        marker_cluster.add_to(mapa)
-
-    elif tipo_visualizacao == "Densidade (HeatMap)":
-        heat_data = df_filtrado[["latitude", "longitude"]].dropna().values.tolist()
-        HeatMap(heat_data, radius=8, blur=15).add_to(mapa)
-
-# Mostra o mapa sempre
-st_data = st_folium(mapa, use_container_width=True, height=600)
-
-# Expande para ver dados brutos
-with st.expander("🔎 Ver dados brutos"):
-    st.dataframe(df_filtrado)
-"""
-
 import pandas as pd
 import os
 
@@ -131,4 +149,4 @@ for br, dados_br in df.groupby(coluna_br):
         dados_br.to_csv(os.path.join('planilhas_por_br', nome_arquivo), sep=';', index=False)
 
 print('Separação concluída!')
-
+"""
