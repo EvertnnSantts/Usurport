@@ -5,6 +5,7 @@ import folium
 from folium.plugins import MarkerCluster, HeatMap
 from streamlit_folium import st_folium
 
+"""
 st.set_page_config(layout="wide")
 
 # Título
@@ -109,3 +110,25 @@ st_data = st_folium(mapa, use_container_width=True, height=600)
 # Expande para ver dados brutos
 with st.expander("🔎 Ver dados brutos"):
     st.dataframe(df_filtrado)
+"""
+
+import pandas as pd
+import os
+
+# Lê o CSV original (usando separador ';', porque parece que é ponto e vírgula)
+df = pd.read_csv('estradas_filtradas_ba.csv', sep=';')
+
+# Cria uma pasta para salvar os novos arquivos (opcional)
+os.makedirs('planilhas_por_br', exist_ok=True)
+
+# Garante que a coluna da estrada é 'br'
+coluna_br = 'br'
+
+# Faz a separação
+for br, dados_br in df.groupby(coluna_br):
+    if pd.notna(br):  # Só separa se o valor de BR não for vazio
+        nome_arquivo = f"BR_{str(br).replace('/', '_').replace(' ', '_')}.csv"
+        dados_br.to_csv(os.path.join('planilhas_por_br', nome_arquivo), sep=';', index=False)
+
+print('Separação concluída!')
+
