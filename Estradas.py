@@ -30,11 +30,11 @@ try:
 
     # Obter a lista de BRs disponíveis
     brs_disponiveis = [arquivo.replace(".csv", "") for arquivo in os.listdir(CAMINHO_PLANILHAS) if arquivo.endswith(".csv")]
-
+    
     if not brs_disponiveis:
         st.error("Nenhuma BR encontrada no diretório de planilhas.")
         st.stop()
-
+    
     # Barra lateral para seleção da BR
     with st.sidebar:
         br_selecionada = st.selectbox("Selecione a BR", sorted(brs_disponiveis))
@@ -48,6 +48,24 @@ try:
         a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
         c = 2 * atan2(sqrt(a), sqrt(1-a))
         return R * c
+
+    def contar_acidentes_no_raio(centro_lat, centro_lon, todos_pontos, raio_km):
+        contador = 0
+        for ponto in todos_pontos:
+            dist = calcular_distancia(centro_lat, centro_lon, ponto[0], ponto[1])
+            if dist <= raio_km:
+                contador += 1
+        return contador
+
+    def definir_cor_circulo(num_acidentes):
+        if num_acidentes < 50:
+            return 'blue'
+        elif num_acidentes < 80:
+            return 'yellow'
+        elif num_acidentes < 120:
+            return 'orange'
+        else:
+            return 'red'
 
     @st.cache_data
     def carregar_dados(br):
@@ -65,7 +83,7 @@ try:
             df = df[
                 (df['latitude'].between(-33.75, 5.27)) &  # Limites do Brasil
                 (df['longitude'].between(-73.99, -34.73))
-                ]
+            ]
             df = df.dropna(subset=['latitude', 'longitude'])
 
             if df.empty:
@@ -113,36 +131,59 @@ try:
                 pontos_selecionados.append(ponto)
 
         # Adicionar círculos de cobertura
+        estatisticas_areas = []
         for i, ponto in enumerate(pontos_selecionados):
+            # Contar acidentes no raio de 10km
+            num_acidentes = contar_acidentes_no_raio(ponto[0], ponto[1], pontos, 10)
+            cor = definir_cor_circulo(num_acidentes)
+
+            # Armazenar estatísticas
+            estatisticas_areas.append({
+                'area': i+1,
+                'acidentes': num_acidentes,
+                'cor': cor
+            })
+
             folium.Circle(
                 location=[ponto[0], ponto[1]],
                 radius=10000,  # 10km em metros
-                color='blue',
+                color=cor,
                 fill=True,
-                fillColor='blue',
+                fillColor=cor,
                 fillOpacity=0.2,
                 weight=2,
-                popup=f"Área de cobertura {i+1}<br>Raio: 10km<br>BR: {br_selecionada}"
+                popup=f"Área de cobertura {i+1}<br>"
+                      f"Raio: 10km<br>"
+                      f"BR: {br_selecionada}<br>"
+                      f"Acidentes na área: {num_acidentes}"
             ).add_to(mapa)
 
         # Exibir o mapa e informações
         col1, col2 = st.columns([3, 1])
-
+        
         with col1:
             st_folium(mapa, width=800, height=600)
-
+        
         with col2:
             st.write("### Informações")
             st.write(f"BR selecionada: {br_selecionada}")
             st.write(f"Quantidade de áreas de cobertura: {len(pontos_selecionados)}")
             st.write("Distância entre centros: 20km")
             st.write("Raio de cada área: 10km")
-            st.write("Cobertura total aproximada: "
-                     f"{len(pontos_selecionados) * 20}km")
+            st.write("---")
+            st.write("### Legenda")
+            st.markdown("🟣 Rosa: Menos de 50 acidentes")
+            st.markdown("🟡 Amarelo: 80 acidentes")
+            st.markdown("🟠 Laranja: 120 acidentes")
+            st.markdown("🔴 Vermelho: mais de 120 acidentes")
+            st.write("---")
+            st.write("### Estatísticas por área")
+            for estat in estatisticas_areas:
+                st.write(f"Área {estat['area']}: {estat['acidentes']} acidentes")
             st.write("---")
             st.write(f"Última atualização: "
-                     f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-
+                    f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+            
     else:
         st.warning("Não há dados disponíveis para esta BR.")
 
