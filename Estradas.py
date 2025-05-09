@@ -30,11 +30,11 @@ try:
 
     # Obter a lista de BRs disponíveis
     brs_disponiveis = [arquivo.replace(".csv", "") for arquivo in os.listdir(CAMINHO_PLANILHAS) if arquivo.endswith(".csv")]
-    
+
     if not brs_disponiveis:
         st.error("Nenhuma BR encontrada no diretório de planilhas.")
         st.stop()
-    
+
     # Barra lateral para seleção da BR
     with st.sidebar:
         br_selecionada = st.selectbox("Selecione a BR", sorted(brs_disponiveis))
@@ -160,10 +160,10 @@ try:
 
         # Exibir o mapa e informações
         col1, col2 = st.columns([3, 1])
-        
+
         with col1:
             st_folium(mapa, width=800, height=600)
-        
+
         with col2:
             st.write("### Informações")
             st.write(f"BR selecionada: {br_selecionada}")
@@ -177,13 +177,9 @@ try:
             st.markdown("🟠 Laranja: 120 acidentes")
             st.markdown("🔴 Vermelho: mais de 120 acidentes")
             st.write("---")
-            st.write("### Estatísticas por área")
-            for estat in estatisticas_areas:
-                st.write(f"Área {estat['area']}: {estat['acidentes']} acidentes")
-            st.write("---")
             st.write(f"Última atualização: "
                     f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-            
+
     else:
         st.warning("Não há dados disponíveis para esta BR.")
 
@@ -195,3 +191,68 @@ except Exception as e:
 if st.button("Limpar Cache"):
     st.cache_data.clear()
     st.rerun()
+def coletar_detalhes_acidentes(centro_lat, centro_lon, df, raio_km):
+    detalhes = []
+    for _, acidente in df.iterrows():
+        dist = calcular_distancia(centro_lat, centro_lon,
+                                acidente['latitude'], acidente['longitude'])
+        if dist <= raio_km:
+            detalhes.append({
+                'vitimas': acidente['vitimas'] if 'vitimas' in acidente else 'N/A',
+                'veiculos': acidente['veiculos'] if 'veiculos' in acidente else 'N/A',
+                'horario': acidente['horario'] if 'horario' in acidente else 'N/A',
+                'clima': acidente['clima'] if 'clima' in acidente else 'N/A',
+                'data': acidente['data'] if 'data' in acidente else 'N/A'
+            })
+    return detalhes
+
+# Modificar a parte onde criamos os círculos
+for i, ponto in enumerate(pontos_selecionados):
+    # Contar acidentes no raio de 10km
+    num_acidentes = contar_acidentes_no_raio(ponto[0], ponto[1], pontos, 10)
+    cor = definir_cor_circulo(num_acidentes)
+
+    # Coletar detalhes dos acidentes nesta área
+    detalhes_acidentes = coletar_detalhes_acidentes(ponto[0], ponto[1], df, 10)
+
+    # Criar HTML para o popup com os detalhes
+    html_content = f"""
+    <div style='width: 300px; max-height: 400px; overflow-y: auto;'>
+        <h4>Área de cobertura {i+1}</h4>
+        <p><strong>Total de acidentes:</strong> {num_acidentes}</p>
+        <p><strong>Raio:</strong> 10km</p>
+        <p><strong>BR:</strong> {br_selecionada}</p>
+        
+        <hr>
+        <h5>Detalhes dos Acidentes:</h5>
+        <div style='max-height: 300px; overflow-y: auto;'>
+    """
+
+    for idx, acidente in enumerate(detalhes_acidentes, 1):
+        html_content += f"""
+        <div style='margin-bottom: 10px; padding: 5px; background-color: #f8f9fa; border-radius: 5px;'>
+            <strong>Acidente {idx}</strong><br>
+            Data: {acidente['data']}<br>
+            Horário: {acidente['horario']}<br>
+            Número de Vítimas: {acidente['vitimas']}<br>
+            Veículos Envolvidos: {acidente['veiculos']}<br>
+            Condição Climática: {acidente['clima']}
+        </div>
+        """
+
+    html_content += "</div></div>"
+
+    # Criar popup com iframe para permitir scrolling
+    popup = folium.Popup(folium.Html(html_content, script=True), max_width=350)
+
+    # Criar círculo ao mapa (removido o parâmetro tooltip)
+    folium.vector_layers.Circle(
+        location=[ponto[0], ponto[1]],
+        radius=10000,  # 10km em metros
+        color=cor,
+        fill=True,
+        fillColor=cor,
+        fillOpacity=0.3,
+        weight=2,
+        popup=popup
+    ).add_to(mapa)
