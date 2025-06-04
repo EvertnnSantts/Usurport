@@ -7,6 +7,8 @@ import numpy as np
 from math import radians, sin, cos, sqrt, atan2
 from datetime import datetime
 import warnings
+import plotly.express as px
+
 warnings.filterwarnings('ignore')
 
 # Configuração da página Streamlit
@@ -44,36 +46,45 @@ try:
         c = 2 * atan2(sqrt(a), sqrt(1-a))
         return R * c
 
-    def contar_acidentes_no_raio(centro_lat, centro_lon, todos_pontos, raio_km):
-        contador = 0
-        for ponto in todos_pontos:
-            dist = calcular_distancia(centro_lat, centro_lon, ponto[0], ponto[1])
-            if dist <= raio_km:
-                contador += 1
-        return contador
+    def contar_acidentes_no_raio(centro_lat, centro_lon, df_acidentes, raio_km):
+        acidentes_no_raio = df_acidentes[df_acidentes.apply(
+            lambda row: calcular_distancia(centro_lat, centro_lon, row['latitude'], row['longitude']) <= raio_km,
+            axis=1
+        )]
+    
+        if 'id' in acidentes_no_raio.columns:
+            acidentes_unicos = acidentes_no_raio.drop_duplicates(subset='id', keep='first')
+        else:
+            acidentes_unicos = acidentes_no_raio.copy()
+        
+        return len(acidentes_unicos)
 
     def definir_cor_circulo(num_acidentes):
-        if num_acidentes < 50:
+        if num_acidentes < 10:
             return 'blue'
-        elif num_acidentes < 80:
+        elif num_acidentes < 40:
             return 'yellow'
-        elif num_acidentes < 120:
+        elif num_acidentes < 70:
             return 'orange'
         else:
             return 'red'
 
     @st.cache_data
-    def carregar_dados(br):
-        try:
-            caminho_arquivo = os.path.join(CAMINHO_PLANILHAS, f"{br}.csv")
-            if not os.path.exists(caminho_arquivo):
-                st.error(f"Arquivo não encontrado: {caminho_arquivo}")
-                return None
+    @st.cache_data(show_spinner="Carregando dados da BR...")
+    def carregar_dados(br: str) -> pd.DataFrame | None:
+        caminho_arquivo = os.path.join(CAMINHO_PLANILHAS, f"{br}.csv")
+    
+        if not os.path.exists(caminho_arquivo):
+            st.error(f"Arquivo não encontrado: {caminho_arquivo}")
+            return None
 
+        try:
             df = pd.read_csv(caminho_arquivo, sep=';', encoding='utf-8')
+
             df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
             df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
 
+            # Filtra coordenadas dentro dos limites geográficos brasileiros
             df = df[
                 (df['latitude'].between(-33.75, 5.27)) &
                 (df['longitude'].between(-73.99, -34.73))
@@ -90,7 +101,23 @@ try:
             st.error(f"Erro ao carregar os dados: {str(e)}")
             return None
 
+
     df = carregar_dados(br_selecionada)
+
+    if df is not None and not df.empty:
+
+        # Cálculos gerais da BR selecionada
+        total_fatalidades_geral = df['mortos'].sum() if 'mortos' in df.columns else 0
+        if 'id' in df.columns:
+            total_acidentes_geral = df.drop_duplicates(subset='id').shape[0]
+        else:
+            total_acidentes_geral = df.shape[0]
+
+        if 'tipo_acidente' in df.columns:
+            acidentes_por_tipo = df.drop_duplicates(subset='id').groupby('tipo_acidente').size().reset_index(name='quantidade')
+        else:
+            acidentes_por_tipo = pd.DataFrame()
+
 
     if df is not None and not df.empty:
 
@@ -118,7 +145,7 @@ try:
                 pontos_selecionados.append(ponto)
 
         for i, ponto in enumerate(pontos_selecionados):
-            num_acidentes = contar_acidentes_no_raio(ponto[0], ponto[1], pontos, 10)
+            num_acidentes = contar_acidentes_no_raio(ponto[0], ponto[1], df, 10)
             cor = definir_cor_circulo(num_acidentes)
 
             acidentes_no_raio = df[df.apply(
@@ -158,16 +185,29 @@ try:
             ).add_to(mapa)
 
         col1, col2 = st.columns([3, 1])
+
+        st.subheader("📊 Visão Geral da BR")
+        col_fat, col_acid = st.columns(2)
+        with col_fat:
+            st.metric("Total de Fatalidades", int(total_fatalidades_geral))
+        with col_acid:
+            st.metric("Total de Acidentes Únicos", int(total_acidentes_geral))
+
+        if not acidentes_por_tipo.empty:
+            fig = px.pie(acidentes_por_tipo, values='quantidade', names='tipo_acidente',
+                     title='Distribuição dos Tipos de Acidentes', hole=0.4)
+            st.plotly_chart(fig, use_container_width=True)
+
         with col1:
             st_folium(mapa, width=800, height=600)
 
         with st.sidebar:
             st.markdown("---")
             st.subheader("Legenda")
-            st.markdown("🔵 Azul: Menos de 50 acidentes")
-            st.markdown("🟡 Amarelo: 50 a 79 acidentes")
-            st.markdown("🟠 Laranja: 80 a 119 acidentes")
-            st.markdown("🔴 Vermelho: 120 ou mais acidentes")
+            st.markdown("🔵 Azul: Menos de 10 acidentes")
+            st.markdown("🟡 Amarelo: 10 a 39 acidentes")
+            st.markdown("🟠 Laranja: 40 a 69 acidentes")
+            st.markdown("🔴 Vermelho: 70 ou mais acidentes")
             st.markdown("---")
             st.write(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
