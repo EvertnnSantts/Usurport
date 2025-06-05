@@ -7,7 +7,7 @@ import numpy as np
 from math import radians, sin, cos, sqrt, atan2
 from datetime import datetime
 import warnings
-import plotly.express as px
+import plotly.express as px 
 
 warnings.filterwarnings('ignore')
 
@@ -69,8 +69,7 @@ try:
         else:
             return 'red'
 
-    @st.cache_data
-    @st.cache_data(show_spinner="Carregando dados da BR...")
+    @st.cache_data(show_spinner="Carregando dados da BR...")  
     def carregar_dados(br: str) -> pd.DataFrame | None:
         caminho_arquivo = os.path.join(CAMINHO_PLANILHAS, f"{br}.csv")
     
@@ -84,7 +83,6 @@ try:
             df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
             df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
 
-            # Filtra coordenadas dentro dos limites geográficos brasileiros
             df = df[
                 (df['latitude'].between(-33.75, 5.27)) &
                 (df['longitude'].between(-73.99, -34.73))
@@ -101,12 +99,9 @@ try:
             st.error(f"Erro ao carregar os dados: {str(e)}")
             return None
 
-
     df = carregar_dados(br_selecionada)
 
     if df is not None and not df.empty:
-
-        # Cálculos gerais da BR selecionada
         total_fatalidades_geral = df['mortos'].sum() if 'mortos' in df.columns else 0
         if 'id' in df.columns:
             total_acidentes_geral = df.drop_duplicates(subset='id').shape[0]
@@ -117,9 +112,6 @@ try:
             acidentes_por_tipo = df.drop_duplicates(subset='id').groupby('tipo_acidente').size().reset_index(name='quantidade')
         else:
             acidentes_por_tipo = pd.DataFrame()
-
-
-    if df is not None and not df.empty:
 
         mapa = folium.Map(
             location=[df['latitude'].mean(), df['longitude'].mean()],
@@ -157,7 +149,6 @@ try:
             else:
                 acidentes_unicos = acidentes_no_raio.copy()
 
-            # Métricas resumidas
             total_fatalidades = acidentes_no_raio['mortos'].sum() if 'mortos' in acidentes_no_raio.columns else 'N/A'
 
             clima_predominante = acidentes_unicos['condicao_metereologica'].mode().iloc[0] if 'condicao_metereologica' in acidentes_unicos.columns and not acidentes_unicos['condicao_metereologica'].mode().empty else 'N/A'
@@ -195,7 +186,7 @@ try:
 
         if not acidentes_por_tipo.empty:
             fig = px.pie(acidentes_por_tipo, values='quantidade', names='tipo_acidente',
-                     title='Distribuição dos Tipos de Acidentes', hole=0.4)
+                         title='Distribuição dos Tipos de Acidentes', hole=0.4)
             st.plotly_chart(fig, use_container_width=True)
 
         with col1:
